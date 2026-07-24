@@ -143,18 +143,23 @@ function dropLoot(e) {
 }
 
 /* ============================================================
-   ENEMY WAVES (FIXED FOR YOUR REAL CODE)
+   ENEMY WAVES (UPGRADED)
    ============================================================ */
 
 function spawnEnemyWave() {
-    for (let i = 0; i < difficulty * 5; i++) {
+    const count = difficulty * 8; // higher spawn rate
+
+    for (let i = 0; i < count; i++) {
         enemy.push({
             x: Math.random() * c.width,
             y: Math.random() * c.height,
-            hp: 20,
+
+            hp: 20 + difficulty * 5, // stronger enemies
+
             size: 20,
-            vx: (Math.random() - 0.5) * 2,
-            vy: (Math.random() - 0.5) * 2
+
+            vx: (Math.random() - 0.5) * (2 + difficulty * 0.2), // faster enemies
+            vy: (Math.random() - 0.5) * (2 + difficulty * 0.2)
         });
     }
 }
@@ -163,11 +168,11 @@ function spawnBoss() {
     boss = {
         x: c.width / 2,
         y: -80,
-        hp: 500,
-        maxHp: 500,
+        hp: 500 + difficulty * 50,
+        maxHp: 500 + difficulty * 50,
         size: 40,
         vx: 0,
-        vy: 2
+        vy: 2 + difficulty * 0.1
     };
 }
 
