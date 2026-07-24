@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Shape Summoner</title>
+<style>
+body { margin:0; overflow:hidden; background:#111; }
+canvas { display:block; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+const c = document.getElementById("game");
+const x = c.getContext("2d");
+
+function resize() {
+  c.width = innerWidth;
+  c.height = innerHeight;
+}
+resize();
+onresize = resize;
+
+// Player
+const p = {
+  x: c.width/2,
+  y: c.height/2,
+  r: 20,
+  s: 5,
+  col: "white",
+  hp: 100,
+  maxHp: 100,
+  regen: 0.1,
+  mana: 50,
+  maxMana: 50,
+  mRegen: 0.2,
+  lvl: 1,
+  xp: 0,
+  xpNext: 20,
+  dmg: 1,
+  sCost: 5,
+  shCost: 3,
+  spdBoost: 0,
+  multi: false,
+  multiCount: 2,
+  shootCooldown: 0,
+  shootDelay: 10
+};
+
+// Game state
+let boss = null;
+let shots = [];
+let bShots = [];
+let sums = [];
+let keys = {};
+let shape = 1;
+let lastX = p.x;
+let lastY = p.y;
+let dead = false;
+let choose = false;
+let cards = [];
+let difficulty = 1;
+let eventTimer = 0;
+
+// Upgrades
+const upgrades = [
+  { name:"Max HP + Heal", apply(){ p.maxHp+=20; p.hp=p.maxHp; }},
+  { name:"Max Mana + Restore", apply(){ p.maxMana+=20; p.mana=p.maxMana; }},
+  { name:"Shot Damage Up", apply(){ p.dmg+=1; }},
+  { name:"Regen Boost", apply(){ p.regen+=0.05; p.mRegen+=0.1; }},
+  { name:"Move Speed Up", apply(){ p.s+=0.5; }},
+  { name:"Summon HP Up", apply(){ sums.forEach(s=>s.hp+=10); }},
+  { name:"Summon Radius Up", apply(){ sums.forEach(s=>s.r+=5); }},
+  { name:"Mana Efficiency", apply(){ p.sCost=Math.max(1,p.sCost-1); p.shCost=Math.max(1,p.shCost-1); }},
+  { name:"Projectile Speed Up", apply(){ p.spdBoost+=1; }},
+  { name:"Multi-Shot +1", apply(){ p.multi=true; p.multiCount+=1; }},
+  { name:"Faster Shooting", apply(){ p.shootDelay=Math.max(3,p.shootDelay-2); }}
+];
+
+const godUpgrades = [
+  { name:"Divine Power +10 DMG", apply(){ p.dmg += 10; }},
+  { name:"Godspeed +10 Move Speed", apply(){ p.s += 10; }},
+  { name:"Infinite Mana Regen", apply(){ p.mRegen += 5; }},
+  { name:"Immortal Summons", apply(){ sums.forEach(s=>s.hp += 9999); }},
+  { name:"Mega Radius +50", apply(){ p.r += 50; }},
+  { name:"Heaven’s Wrath (screen nuke)", apply(){ boss = null; bShots = []; shots = []; }}
+];
+
+const events = [
+  { name:"Meteor Shower", run(){ spawnMeteors(); }},
+  { name:"Healing Wave", run(){ p.hp = p.maxHp; }},
+  { name:"Mana Storm", run(){ p.mana = p.maxMana; }},
+  { name:"Summon Burst", run(){ spawnRandomSummons(); }},
+  { name:"Boss Frenzy", run(){ difficulty += 0.5; }},
+  { name:"Time Slow", run(){ p.s += 3; }}
+];
+
+// Save / Load
+function saveGame() {
+  const data = {
+    p,
+    difficulty,
+    sums
+  };
+  localStorage.setItem("summonerSave", JSON.stringify(data));
+}
+
+function loadGame() {
+  const raw = localStorage.getItem("summonerSave");
+  if (!raw) return false;
+  const data = JSON.parse(raw);
+  Object.assign(p, data.p);
+  difficulty = data.difficulty;
+  sums = data.sums || [];
+  return true;
+}
+
+function resetSave() {
+  localStorage.removeItem("summonerSave");
+}
+
+// Mouse
+onmousemove = e => {
+  lastX = e.clientX;
+  lastY = e.clientY;
+};
+
+// Border collision
+function borderCollide(obj) {
+  if (obj.x - obj.r < 0) { obj.x = obj.r; return true; }
+  if (obj.x + obj.r > c.width) { obj.x = c.width - obj.r; return true; }
+  if (obj.y - obj.r < 0) { obj.y = obj.r; return true; }
+  if (obj.y + obj.r > c.height) { obj.y = c.height - obj.r; return true; }
+  return false;
+}
+
+// Boss spawn
+function spawnBoss() {
+  const eliteChance = 0.2;
+  const godChance = 0.05;
+  const isGod = Math.random() < godChance;
+  const elite = !isGod && Math.random() < eliteChance;
+
+  boss = {
+    x: Math.random()*c.width,
+    y: Math.random()*c.height,
+    r: isGod ? 120 : elite ? 70 : 50,
+    hp: (isGod ? 300 : elite ? 40 : 15) * difficulty,
+    s: (isGod ? 4 : elite ? 3 : 2) * (0.8 + difficulty * 0.2),
+    col: isGod ? "gold" : elite ? "purple" : "red",
+    elite,
+    god: isGod,
+    cd: 0
+  };
+}
+setInterval(() => {
+  if (!boss && !dead && !choose) spawnBoss();
+}, 6000 / (0.8 + difficulty * 0.1));
+
+// Keys
+onkeydown = e => {
+  keys[e.key] = true;
+  if (choose) return;
+  if (e.key==="1") shape=1;
+  if (e.key==="2") shape=2;
+  if (e.key==="3") shape=3;
+  if (e.key==="4") shape=4;
+  if (e.key===" ") shoot();
+  if (e.key==="k") saveGame();
+  if (e.key==="l") loadGame();
+  if (e.key==="r") resetSave();
+};
+onkeyup = e => keys[e.key] = false;
+
+// Offer cards
+function offerCards() {
+  choose = true;
+  cards = [];
+  while (cards.length < 3) {
+    const c = upgrades[Math.floor(Math.random()*upgrades.length)];
+    if (!cards.includes(c)) cards.push(c);
+  }
+}
+
+function offerGodCards() {
+  choose = true;
+  cards = [];
+  while (cards.length < 3) {
+    const c = godUpgrades[Math.floor(Math.random()*godUpgrades.length)];
+    if (!cards.includes(c)) cards.push(c);
+  }
+}
+
+// Click
+onclick = e => {
+  if (choose) {
+    const w=250,h=150,g=50;
+    const sx = c.width/2 - (w*1.5 + g);
+    const y = 250;
+    for (let i=0;i<3;i++) {
+      const xx = sx + i*(w+g);
+      if (e.clientX>=xx && e.clientX<=xx+w &&
+          e.clientY>=y && e.clientY<=y+h) {
+        cards[i].apply();
+        choose = false;
+        return;
+      }
+    }
+    return;
+  }
+
+  if (dead) {
+    respawn();
+    return;
+  }
+
+  if (p.mana < p.sCost) return;
+  p.mana -= p.sCost;
+
+  sums.push({
+    x: e.clientX,
+    y: e.clientY,
+    r: 20,
+    col: `hsl(${Math.random()*360},80%,60%)`,
+    sh: shape,
+    hp: 10
+  });
+
+  fuseSummons();
+};
+
+// Shooting
+function shoot() {
+  if (dead || choose) return;
+  if (p.shootCooldown > 0) return;
+  if (p.mana < p.shCost) return;
+
+  p.shootCooldown = p.shootDelay;
+  p.mana -= p.shCost;
+
+  const speed = 8 + p.spdBoost;
+  const angle = Math.atan2(lastY - p.y, lastX - p.x);
+
+  function makeShot(a) {
+    shots.push({
+      x: p.x,
+      y: p.y,
+      r: 12,
+      sp: speed,
+      dx: Math.cos(a),
+      dy: Math.sin(a),
+      col: `hsl(${Math.random()*360},80%,60%)`,
+      sh: shape,
+      dmg: p.dmg
+    });
+  }
+
+  if (p.multi) {
+    const n = p.multiCount;
+    const spread = 0.25;
+    for (let i = 0; i < n; i++) {
+      const off = spread * ((i / (n - 1)) - 0.5);
+      makeShot(angle + off);
+    }
+  } else {
+    makeShot(angle);
+  }
+}
+
+function respawn() {
+  p.x = c.width / 2;
+  p.y = c.height / 2;
+  p.hp = p.maxHp;
+  p.mana = p.maxMana;
+  dead = false;
+  boss = null;
+  shots = [];
+  bShots = [];
+  sums = [];
+}
+
+// Draw summon / shot
+function drawSummon(s) {
+  x.setTransform(1,0,0,1,0,0);
+  x.fillStyle = s.col;
+  if (s.sh === 1) {
+    x.beginPath();
+    x.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    x.fill();
+  } else if (s.sh === 2) {
+    x.fillRect(s.x - s.r, s.y - s.r, s.r * 2, s.r * 2);
+  } else if (s.sh === 3) {
+    x.beginPath();
+    x.moveTo(s.x, s.y - s.r);
+    x.lineTo(s.x - s.r, s.y + s.r);
+    x.lineTo(s.x + s.r, s.y + s.r);
+    x.closePath();
+    x.fill();
+  } else if (s.sh === 4) {
+    const spikes = 5;
+    const outer = s.r;
+    const inner = s.r / 2.5;
+    let rot = Math.PI / 2 * 3;
+    const step = Math.PI / spikes;
+    x.beginPath();
+    x.moveTo(s.x, s.y - outer);
+    for (let i = 0; i < spikes; i++) {
+      x.lineTo(s.x + Math.cos(rot) * outer, s.y + Math.sin(rot) * outer);
+      rot += step;
+      x.lineTo(s.x + Math.cos(rot) * inner, s.y + Math.sin(rot) * inner);
+      rot += step;
+    }
+    x.closePath();
+    x.fill();
+  }
+}
+
+// Fuse summons
+function fuseSummons() {
+  for (let i = 0; i < sums.length; i++) {
+    for (let j = i + 1; j < sums.length; j++) {
+      const a = sums[i];
+      const b = sums[j];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (d < a.r + b.r) {
+        a.r += b.r * 0.5;
+        a.hp += b.hp;
+        sums.splice(j, 1);
+        j--;
+      }
+    }
+  }
+}
+
+// Level up
+function levelUp() {
+  p.lvl++;
+  p.xp = 0;
+  p.xpNext = Math.floor(p.xpNext * 1.5);
+  p.maxHp += 10;
+  p.hp = p.maxHp;
+  p.maxMana += 10;
+  p.mana = p.maxMana;
+  p.dmg += 0.5;
+  p.regen += 0.02;
+  difficulty += 0.2;
+}
+
+// Random events
+function triggerRandomEvent() {
+  const e = events[Math.floor(Math.random()*events.length)];
+  e.run();
+}
+
+function spawnMeteors() {
+  for (let i = 0; i < 10; i++) {
+    bShots.push({
+      x: Math.random()*c.width,
+      y: -50,
+      r: 20,
+      sp: 8,
+      dx: 0,
+      dy: 1,
+      col: "orange",
+      dmg: 5 * difficulty
+    });
+  }
+}
+
+function spawnRandomSummons() {
+  for (let i = 0; i < 5; i++) {
+    sums.push({
+      x: Math.random()*c.width,
+      y: Math.random()*c.height,
+      r: 20,
+      col: `hsl(${Math.random()*360},80%,60%)`,
+      sh: Math.floor(Math.random()*4)+1,
+      hp: 20
+    });
+  }
+}
+
+// Update
+function update() {
+  if (p.shootCooldown > 0) p.shootCooldown--;
+
+  if (!dead && !choose) {
+    if (keys["w"] || keys["W"]) p.y -= p.s;
+    if (keys["s"] || keys["S"]) p.y += p.s;
+    if (keys["a"] || keys["A"]) p.x -= p.s;
+    if (keys["d"] || keys["D"]) p.x += p.s;
+    borderCollide(p);
+    p.hp = Math.min(p.maxHp, p.hp + p.regen);
+    p.mana = Math.min(p.maxMana, p.mana + p.mRegen);
+  }
+
+  eventTimer++;
+  if (eventTimer > 1800) {
+    triggerRandomEvent();
+    eventTimer = 0;
+  }
+
+  // Boss logic
+  if (boss && !dead && !choose) {
+    let angle = Math.atan2(p.y - boss.y, p.x - boss.x);
+
+    // summons block boss
+    for (let i = 0; i < sums.length; i++) {
+      const s = sums[i];
+      const d = Math.hypot(boss.x - s.x, boss.y - s.y);
+      if (d < boss.r + s.r) {
+        s.hp -= 0.2;
+        if (s.hp <= 0) {
+          sums.splice(i, 1);
+          i--;
+        }
+        angle += Math.PI / 2;
+      }
+    }
+
+    boss.x += Math.cos(angle) * boss.s;
+    boss.y += Math.sin(angle) * boss.s;
+    borderCollide(boss);
+
+    boss.cd--;
+    if (boss.cd <= 0) {
+      const ba = Math.atan2(p.y - boss.y, p.x - boss.x);
+      bShots.push({
+        x: boss.x,
+        y: boss.y,
+        r: 8,
+        sp: boss.god ? 10 + difficulty : 5 + difficulty,
+        dx: Math.cos(ba),
+        dy: Math.sin(ba),
+        col: boss.god ? "white" : boss.elite ? "magenta" : "orange",
+        dmg: (boss.god ? 10 : boss.elite ? 4 : 2) * difficulty
+      });
+      boss.cd = (boss.elite ? 40 : 60) / (0.8 + difficulty * 0.1);
+    }
+  }
+
+  // Summons stay in border
+  sums.forEach(s => borderCollide(s));
+
+  // Shots
+  shots.forEach((s, i) => {
+    s.x += s.dx * s.sp;
+    s.y += s.dy * s.sp;
+    if (borderCollide(s)) shots.splice(i, 1);
+  });
+
+  bShots.forEach((b, i) => {
+    b.x += b.dx * b.sp;
+    b.y += b.dy * b.sp;
+    if (borderCollide(b)) bShots.splice(i, 1);
+  });
+
+  // Player shots hit boss
+  if (boss) {
+    for (let i = shots.length - 1; i >= 0; i--) {
+      if (!boss) break;
+      const s = shots[i];
+      const d = Math.hypot(s.x - boss.x, s.y - boss.y);
+      if (d < s.r + boss.r) {
+        boss.hp -= s.dmg;
+        shots.splice(i, 1);
+        if (boss.hp <= 0) {
+          const elite = boss.elite;
+          const god = boss.god;
+          boss = null;
+          p.xp += god ? 50 : elite ? 15 : 10;
+          if (p.xp >= p.xpNext) levelUp();
+          if (god) offerGodCards();
+          else if (elite) offerCards();
+          return;
+        }
+      }
+    }
+  }
+
+  // Boss shots hit player / summons
+  for (let i = bShots.length - 1; i >= 0; i--) {
+    const b = bShots[i];
+    const dp = Math.hypot(b.x - p.x, b.y - p.y);
+    if (dp < b.r + p.r) {
+      p.hp -= b.dmg;
+      bShots.splice(i, 1);
+      if (p.hp <= 0) {
+        p.hp = 0;
+        dead = true;
+      }
+      continue;
+    }
+
+    let hit = false;
+    for (let j = 0; j < sums.length; j++) {
+      const s = sums[j];
+      const ds = Math.hypot(b.x - s.x, b.y - s.y);
+      if (ds < b.r + s.r) {
+        s.hp -= b.dmg;
+        bShots.splice(i, 1);
+        hit = true;
+        if (s.hp <= 0) sums.splice(j, 1);
+        break;
+      }
+    }
+    if (hit) continue;
+
+    if (b.x < -50 || b.x > c.width + 50 ||
+        b.y < -50 || b.y > c.height + 50) {
+      bShots.splice(i, 1);
+    }
+  }
+
+  // Boss touches player
+  if (boss && !dead && !choose) {
+    const d = Math.hypot(p.x - boss.x, p.y - boss.y);
+    if (d < p.r + boss.r) {
+      p.hp -= 1;
+      if (p.hp <= 0) {
+        p.hp = 0;
+        dead = true;
+      }
+    }
+  }
+}
+
+// Draw
+function draw() {
+  x.setTransform(1,0,0,1,0,0);
+  x.clearRect(0,0,c.width,c.height);
+
+  // Border
+  x.strokeStyle = "white";
+  x.lineWidth = 4;
+  x.strokeRect(0,0,c.width,c.height);
+
+  // Player
+  x.beginPath();
+  x.arc(p.x,p.y,p.r,0,Math.PI*2);
+  x.fillStyle=p.col;
+  x.fill();
+
+  // HP bar
+  x.fillStyle="red";
+  x.fillRect(p.x-20,p.y-p.r-20,40,6);
+  x.fillStyle="lime";
+  x.fillRect(p.x-20,p.y-p.r-20,(p.hp/p.maxHp)*40,6);
+
+  // Mana bar
+  x.fillStyle="blue";
+  x.fillRect(p.x-20,p.y+p.r+10,40,6);
+  x.fillStyle="cyan";
+  x.fillRect(p.x-20,p.y+p.r+10,(p.mana/p.maxMana)*40,6);
+
+  // XP
+  x.fillStyle="white";
+  x.font="16px Arial";
+  x.fillText(`Lvl ${p.lvl}  XP ${p.xp}/${p.xpNext}`,10,20);
+  x.fillText(`Difficulty ${difficulty.toFixed(2)}`,10,40);
+
+  // Summons + shots
+  sums.forEach(drawSummon);
+  shots.forEach(s => { drawSummon(s); });
+
+  // Boss shots
+  bShots.forEach(b=>{
+    x.setTransform(1,0,0,1,0,0);
+    x.beginPath();
+    x.arc(b.x,b.y,b.r,0,Math.PI*2);
+    x.fillStyle=b.col;
+    x.fill();
+  });
+
+  // Boss
+  if (boss) {
+    x.setTransform(1,0,0,1,0,0);
+    x.beginPath();
+    x.arc(boss.x,boss.y,boss.r,0,Math.PI*2);
+    x.fillStyle=boss.col;
+    x.fill();
+
+    x.fillStyle="white";
+    x.fillRect(boss.x-40,boss.y-boss.r-20,80,10);
+    x.fillStyle="lime";
+    const baseHp = boss.god ? 300 : boss.elite ? 40 : 15;
+    x.fillRect(
+      boss.x-40,
+      boss.y-boss.r-20,
+      (boss.hp/(baseHp*difficulty))*80,
+      10
+    );
+
+    x.fillStyle="yellow";
+    x.font="14px Arial";
+    if (boss.god) x.fillText("GOD",boss.x,boss.y-boss.r-35);
+    else if (boss.elite) x.fillText("ELITE",boss.x,boss.y-boss.r-35);
+  }
+
+  // Upgrade UI
+  if (choose) {
+    x.setTransform(1,0,0,1,0,0);
+    x.fillStyle="rgba(0,0,0,0.7)";
+    x.fillRect(0,0,c.width,c.height);
+    x.fillStyle="white";
+    x.font="40px Arial";
+    x.fillText("Choose an Upgrade",c.width/2,150);
+
+    const w=250,h=150,g=50;
+    const sx=c.width/2-(w*1.5+g);
+    const y=250;
+
+    cards.forEach((card,i)=>{
+      const xx=sx+i*(w+g);
+      x.fillStyle="#222";
+      x.fillRect(xx,y,w,h);
+      x.strokeStyle="white";
+      x.strokeRect(xx,y,w,h);
+      x.fillStyle="white";
+      x.font="24px Arial";
+      x.fillText(card.name,xx+w/2,y+h/2);
+    });
+  }
+
+  // Death screen
+  if (dead && !choose) {
+    x.setTransform(1,0,0,1,0,0);
+    x.fillStyle="rgba(0,0,0,0.7)";
+    x.fillRect(0,0,c.width,c.height);
+    x.fillStyle="white";
+    x.font="60px Arial";
+    x.fillText("YOU DIED",c.width/2,c.height/2-40);
+    x.font="30px Arial";
+    x.fillText("Click to Respawn",c.width/2,c.height/2+20);
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+
+function gameLoop() {
+  update();
+  draw();
+}
+
+setInterval(saveGame, 10000);
+loadGame();
+gameLoop();
+</script>
+</body>
+</html>
