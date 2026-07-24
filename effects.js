@@ -135,56 +135,53 @@ function onSummonKill(s) {
 
 let shards = 0;
 
-function dropLoot(enemy) {
+function dropLoot(e) {
     if (Math.random() < 0.4) {
         shards++;
-        spawnParticles(enemy.x, enemy.y, "#00ffcc", 10);
+        spawnParticles(e.x, e.y, "#00ffcc", 10);
     }
 }
 
 /* ============================================================
-   BOSS WAVES
+   ENEMY WAVES (FIXED FOR YOUR REAL CODE)
    ============================================================ */
 
-let bossActive = false;
+function spawnEnemyWave() {
+    for (let i = 0; i < difficulty * 5; i++) {
+        enemy.push({
+            x: Math.random() * c.width,
+            y: Math.random() * c.height,
+            hp: 20,
+            size: 20,
+            vx: (Math.random() - 0.5) * 2,
+            vy: (Math.random() - 0.5) * 2
+        });
+    }
+}
 
 function spawnBoss() {
-    bossActive = true;
     boss = {
         x: c.width / 2,
         y: -80,
-        vx: 0,
-        vy: 1.5,
         hp: 500,
         maxHp: 500,
         size: 40,
-        type: "boss"
+        vx: 0,
+        vy: 2
     };
 }
 
 function updateWaveSystem() {
-    if (!bossActive && enemies.length === 0) {
-        wave++;
-        if (wave % 5 === 0) {
+    if (!boss && enemy.length === 0) {
+
+        difficulty++;
+
+        if (difficulty % 5 === 0) {
             spawnBoss();
         } else {
-            spawnWave();
+            spawnEnemyWave();
         }
     }
-}
-
-function drawBossUI() {
-    if (!bossActive || !boss) return;
-
-    const w = 200;
-    const xPos = (c.width - w) / 2;
-    const yPos = 20;
-
-    x.fillStyle = "#222";
-    x.fillRect(xPos, yPos, w, 10);
-
-    x.fillStyle = "#ff4444";
-    x.fillRect(xPos, yPos, w * (boss.hp / boss.maxHp), 10);
 }
 
 /* ============================================================
@@ -205,5 +202,19 @@ function drawHUD() {
     x.fillText("Shards: " + shards, 20, 50);
 
     x.fillStyle = "#ffffff";
-    x.fillText("Wave: " + wave, 20, 70);
+    x.fillText("Wave: " + difficulty, 20, 70);
+}
+
+function drawBossUI() {
+    if (!boss) return;
+
+    const w = 200;
+    const xPos = (c.width - w) / 2;
+    const yPos = 20;
+
+    x.fillStyle = "#222";
+    x.fillRect(xPos, yPos, w, 10);
+
+    x.fillStyle = "#ff4444";
+    x.fillRect(xPos, yPos, w * (boss.hp / boss.maxHp), 10);
 }
