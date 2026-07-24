@@ -1,9 +1,7 @@
-// Minimal working effects.js so the game does NOT crash
-
 function effectsUpdate() {
-    // nothing yet — safe placeholder
+    // placeholder so the game doesn't crash
 }
 
 function effectsDraw() {
-    // nothing yet — safe placeholder
+    // placeholder so the game doesn't crash
 }
